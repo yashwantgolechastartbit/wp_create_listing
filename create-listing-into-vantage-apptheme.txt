@@ -1,0 +1,508 @@
+<?php
+function register_product_listing_menu_page() {
+    add_menu_page(
+        __( 'Products Listings', 'clone-listing' ),
+        'Products Listings',
+        'manage_options',
+        'product-listings',
+        'product_listing_content',
+        'dashicons-feedback',
+        26
+    );      
+}
+add_action( 'admin_menu', 'register_product_listing_menu_page' );
+
+function product_listing_content(){
+  if($_GET['lstnid']){
+    if(isset($_POST['duplicate_listing'])){
+   if ( ! isset( $_POST['duplicate_listing'] ) || ! wp_verify_nonce( $_POST['duplicate_listing'], 'clone_listing' ) ) {
+         print 'Sorry, your nonce did not verify.';
+     exit;
+   } else {
+
+     $business_names = explode(",",$_POST['business_name']);
+     $listing_id     = $_POST['list_id'];
+     $replace_text   = $_POST['replace_word'];
+     
+     $post_data = get_post($listing_id);     
+     
+     foreach($business_names as $bnm){
+          $bt_title = make_business_title($post_data->post_title, $bnm, $replace_text);
+
+          $exist = check_duplicate_listing_into_clone_listing($bt_title);
+          if($exist == 1)
+            $error[] = $bt_title;
+          else  
+           $nlst_id = create_clone_for_listings($post_data, $bnm, $replace_text);
+
+          $boards[] = get_post_meta($nlst_id, 'boardID', true); // here board id is term id
+     }
+     $ideas_id = fetch_ideas_from_board($listing_id);
+     if(is_array($ideas_id)){
+       foreach($ideas_id as $idea_id){
+         $term_list = wp_get_post_terms($idea_id, 'boards', array("fields" => "ids"));
+
+         if(is_array($term_list)){
+            $board_ids = array_merge($term_list,$boards);
+            wp_set_post_terms( $idea_id, $board_ids, 'boards' );
+          }          
+        }
+      }
+     if($nlst_id) 
+       $msgn = 'success';
+
+       unset($post_data);
+       unset($listing_id);
+       unset($replace_text);
+
+  }
+}
+?>
+<div class="container">
+  <?php if($msgn){ ?>
+  <div class="update-nag" style="border-left: 4px solid #34EE43;"><b>Success!</b> New listings have been cloned successfully.</div>
+  <?php } ?>
+  <?php if(is_array($error) && count($error)>=1){?>
+    <h2>The following listings are not created due to already exists with same listing title.</h2>
+      <?php $i = 1;
+        foreach($error as $er){
+          echo "<p>($i.) $er</p>";
+          $i++;
+         }
+        }
+      ?>
+  <h2>Enter business name by comma separated into below box to create duplicate listings </h2>
+<form name="dpl" action="" method="post">
+  <?php wp_nonce_field( 'clone_listing', 'duplicate_listing' ); ?>
+  <div class="dp-field">
+  <label for="word">Enter word/phrase which you want to replace into listing title, summary and detail.</label>
+  <input type="text" name="replace_word" value="">
+ </div>
+  <div class="dp-field">
+  <label for="business">Enter Business Name as comma separated (Ex. Ucities, Proscope, Digital, ...)</label>
+  <textarea rows="10" cols="100" name="business_name"></textarea>
+ </div>
+ <div class="dp-field">
+  <input type="hidden" name="list_id" value="<?php echo $_GET['lstnid'];?>">
+  <input type="submit" name="submit" value="Submit" class="button btn">
+ </div>
+</form> 
+</div> 
+<style type="text/css">
+  .container{
+    width: 95%;
+    margin-top: 10px;
+  }
+  .container form label{
+    display: block;    
+  }
+  .container form .dp-field{
+    display: block;
+    margin:10px auto;
+  }
+
+  .container form .dp-field input[type=text]{
+    width: 77%;
+    padding: 10px;
+   } 
+
+</style>
+    <?php
+  }
+    
+    else{
+    $paged = ($_GET['paged']) ? $_GET['paged'] : 1;
+ if($_GET['keyword']){
+      $args = array(
+      's'             => $_GET['keyword'],  
+      'post_type'     => 'product',
+      'paged'         => $paged,
+      'post_status'   => array('publish','trash','deleted','expired','pending','private'),
+      'posts_per_page'=> 9
+     );
+  }else{
+     $args = array(
+    'post_type'     => 'product',
+    'paged'         => $paged,
+    'post_status'   => array('publish','trash','deleted','expired','pending','private'),
+    'posts_per_page'=> 9
+   );
+ }
+
+$the_query = new WP_Query($args);
+$GLOBALS['query'] = $the_query;
+if($the_query->have_posts()): ?>
+<div class="container">
+  <div class="search-box">
+    <img class="loader" style="display: none;" src="<?php echo plugins_url('load.gif',__FILE__); ?>" />
+  <input type="text" name="search" value="<?php echo $_GET['keyword']; ?>" placeholder="Enter product title" id="searchKey">
+  <input type="button" name="submit" value="Search Products" id="productSearch">
+</div>
+  <div class="heading-text">
+    <h3>Select products which you want to create listing</h3>
+    <div class="notification" style="display: none;">
+     <div class="error"><span>Following listings are not created:</span><div class="econtent"></div></div>
+     <div class="success"><span>Following listings are created successfully:</span><div class="scontent"></div></div>
+    </div> 
+    <a class="btn button" href="javascript:void(0)" id="creatLists">Create Listing</a>
+    <img class="pload" style="display: none; width: 28px;" src="<?php echo plugins_url('load.gif',__FILE__); ?>" />
+  </div>
+<div class="inner-section"> 
+<form name="products" method="post" action=""> 
+<div class="row header"> 
+  <label for="select-all">Select All</label>
+ <div class="bulk-settings"> 
+  <input type="checkbox" name="amz-aproduct" value="" id="selectAll">
+</div>  
+<div class="product-image">Image</div>
+<div class="title">Title</div>
+</div> 
+<div class="product-section"> 
+<?php while($the_query->have_posts()): $the_query->the_post();?>
+<div class="row">  
+<input type="checkbox" name="amz-product" value="<?php echo get_the_ID(); ?>">
+<div class="product-image">
+  <?php if(has_post_thumbnail()):
+          the_post_thumbnail(array(65,45));   
+        endif;
+   ?>
+</div>
+<div class="title"><?php the_title(); ?></div>
+</div>
+<?php 
+endwhile;
+?>
+<div id="pagination" class="clearfix"><?php paginate_listings(); ?></div>
+</div>
+</form>
+<?php 
+wp_reset_postdata();
+?>
+</div>
+</div>
+<?php
+endif;  
+?>
+<script type="text/javascript">
+  jQuery(document).ready(function($){
+    $("#productSearch").click(function(){
+      $(".loader").show();
+      $(".inner-section form .product-section").fadeOut('slow');
+      var skey = $("#searchKey").val();
+        $.post(
+          AppThemes.ajaxurl, 
+          {
+              'action': 'search_into_vantage_product_listing',
+              'keyword': skey
+          }, 
+          function(response) {
+            $(".loader").hide();
+            $(".inner-section form .product-section").fadeIn('slow').html(response);
+              console.log('The server responded: ', response);
+          }
+      );
+      });  
+
+    $('#selectAll').click(function () {    
+     $('input:checkbox').prop('checked', this.checked);    
+    });
+
+    $("#creatLists").click(function(){
+      $(".pload").show();
+      var allPd = new Array();      
+        $(".product-section input:checkbox[name=amz-product]:checked").each(function(){
+          allPd.push($(this).val());                             
+        });
+        //console.log(allPd);        
+        $.post(
+          AppThemes.ajaxurl, 
+          {
+              'action': 'create_listing_by_products',              
+              'prod': allPd
+          }, 
+          function(response) {
+            $(".pload").hide();
+            var data = $.parseJSON(response);
+            $(".notification").fadeIn('slow');
+
+            if(data.error == 'None'){
+              $(".notification .error .econtent").html('<p>'+data.error+'</p>');
+             }else{
+               $(".notification .error .econtent").html(''); 
+                for(i=0; i<data.error.length; i++){ j = i+1; 
+                  $(".notification .error .econtent").append('<p>'+j+'. '+data.error[i]+'</p>');
+                }                
+             } 
+             
+            if(data.success == 'No listing created'){  
+              $(".notification .success .scontent").html('<p>'+data.success+'</p>');              
+            }else{ 
+               $(".notification .success .scontent").html('');
+               for(i=0; i<data.success.length; i++){ k = i+1;
+                $(".notification .success .scontent").append('<p>'+k+'. '+data.success[i]+'</p>');
+               }                
+             } 
+            console.log('The server responded: ', response);
+          }
+      );
+   });
+});
+</script>
+<style type="text/css">
+  .container{
+    width: 95%;
+    margin-top: 10px;
+    padding: 20px;
+    background-color: #fff;
+  }
+  .product-image, .title{
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .title{
+    width: calc(100% - 18%);
+  }
+  .search-box {
+    display: flex;
+    justify-content: flex-end;   
+}
+
+.search-box img.loader {    
+    width: 42px;
+    position: absolute;
+    right: 166px;
+}
+
+.search-box input[type=text],
+.search-box input[type=button] {
+    padding: 12px 5px;  
+}
+.search-box input[type=text] {
+    width: 500px;
+}
+
+.product-image{
+   width: calc(100% - 90%);
+   padding: 0px;
+   height: 45px;
+}
+
+.header .product-image{
+  height: auto;
+}
+
+.header{
+  background-color: #ccc;
+  font-size: 16px;
+}
+
+.row input[type=checkbox]{
+  margin-right: 55px;
+}
+
+.row {
+  border: 1px solid #ECECEC;
+  padding: 5px;
+  margin: 5px auto;  
+}
+
+.inner-section{
+  min-height: 550px;
+}
+
+form .row label{
+  display: block;
+  font-size: 14px;
+}
+
+.bulk-settings {
+    width: 75px;
+    display: inline-block;
+}
+
+/*======= pagination css ======== */
+#pagination {
+clear:both;
+padding:20px 0;
+position:relative;
+display: table;
+margin: 0 auto;
+}
+
+#pagination span, #pagination a {
+display:block;
+float:left;
+margin: 2px 2px 2px 0;
+padding:6px 9px 5px 9px;
+text-decoration:none;
+width:auto;
+color:#fff;
+background: #555;
+}
+
+#pagination a:hover{
+color:#fff;
+background: #3279BB;
+}
+
+#pagination .current{
+padding:6px 9px 5px 9px;
+background: #3279BB;
+color:#fff;
+}
+</style>
+   <?php }
+    
+}
+
+function create_products_for_listings($post_info, $bsnm, $rep_word){
+
+   $lid = $post_info->ID; 
+
+   $new_listing = create_listing_into_db($lid, $filter_data, $post_info);
+   return $new_listing;
+}
+
+add_action( 'wp_ajax_search_into_vantage_product_listing', 'my_ajax_search_into_vantage_product_listing' );
+
+function my_ajax_search_into_vantage_product_listing() {   
+   $keyword = $_POST['keyword'];
+   $paged = ($_GET['paged']) ? $_GET['paged'] : 1;   
+   $kw = '';
+   $args = array(
+    's'             => $keyword,
+    'post_type'     => 'product',
+    'paged'         => $paged,
+    'post_status'   => array('publish','trash','deleted','expired','pending','private'),
+    'posts_per_page'=> 9
+   );
+  
+$the_query = new WP_Query($args);
+$output = '';
+if($the_query->have_posts()): 
+ while($the_query->have_posts()): $the_query->the_post();
+  $output .= '<div class="row">';  
+  $output .= '<input type="checkbox" name="amz-product" value="'.get_the_ID().'">';
+  $output .= '<div class="product-image">';
+   if(has_post_thumbnail()):
+     $output .= get_the_post_thumbnail(get_the_ID(),array(65,45));   
+   endif;
+  $output .= '</div>';
+  $output .= '<div class="title">'.get_the_title().'</div>';  
+  $output .= '</div>';
+ endwhile;
+ $total_pages = $the_query->max_num_pages;
+  if($keyword)
+   $kw = '&keyword='.$keyword;
+
+    if ($total_pages > 1):
+        $current_page = max(1, $_GET['paged']);
+        $page_html = paginate_links(array(
+            'base' => admin_url('admin.php').'?page=product-listings'.$kw. '%_%',
+            'format' => '&paged=%#%',
+            'current' => $current_page,
+            'total' => $total_pages,
+            'prev_text'    => __('« Prev'),
+            'next_text'    => __('Next »'),
+        ));
+        $output .= '<div id="pagination" class="clearfix">'.$page_html.'</div>';
+   endif;  
+else:
+ $output .= '<div class="row">No listing found! Try again.</div>'; 
+ wp_reset_postdata();
+endif;
+ echo $output;
+
+wp_die();
+}
+
+function paginate_listings(){
+  global $query;  
+
+  if($_GET['keyword'])
+   $kyw = admin_url('admin.php').'?page=product-listings&keyword='.$_GET['keyword'];
+  else
+   $kyw = get_pagenum_link(1); 
+
+  $total_pages = $query->max_num_pages;
+    if ($total_pages > 1){
+
+        $current_page = max(1, $_GET['paged']);
+
+        echo paginate_links(array(
+            'base' => $kyw . '%_%',
+            'format' => '&paged=%#%',
+            'current' => $current_page,
+            'total' => $total_pages,
+            'prev_text'    => __('« Prev'),
+            'next_text'    => __('Next »'),
+        ));
+    }
+}
+
+add_action( 'wp_ajax_create_listing_by_products', 'create_listing_by_products_in_vantage' );
+function create_listing_by_products_in_vantage() {
+   $product_ids = $_REQUEST['prod'];
+
+   foreach($product_ids as $pid){
+      $product_data = get_post($pid); 
+       $exist = check_duplicate_listing_into_clone_listing($product_data->post_title);
+          if($exist == 1)
+            $errors[] = $product_data->post_title;
+          else  
+           $nlst_title[] = create_listing_from_amazon_product_info($product_data); 
+   }
+
+   if(is_array($errors) && count($errors) >= 1)
+     $final_data['error'] = $errors;
+   else
+     $final_data['error'] = 'None';
+
+   if(is_array($nlst_title) && count($nlst_title) >= 1)
+    $final_data['success'] = $nlst_title;
+   else
+    $final_data['success'] = 'No listing created';
+
+   echo json_encode($final_data);
+
+   wp_die();
+}
+
+function create_listing_from_amazon_product_info($post_info){      
+   $new_listing = create_listing_into_db_for_amazon_product($post_info);
+   return $new_listing;
+}
+
+function create_listing_into_db_for_amazon_product($post_info){
+    global $wpdb;
+    
+    // creating post array
+    $post_data['post_title']        = $post_info->post_title;
+    $post_data['post_author']       = 2;
+
+    $post_data['post_date']         = current_time( 'mysql' );
+    $post_data['post_date_gmt']     = current_time( 'mysql' );
+    $post_data['post_modified']     = current_time( 'mysql' );
+    $post_data['post_modified_gmt'] = current_time( 'mysql' );
+
+    $post_data['post_content']      = $post_info->post_content;
+    $post_data['post_status']       = 'publish';
+    $post_data['post_type']         = 'listing';
+
+    // Insert the post into the database.
+      $new_list_id = wp_insert_post( $post_data );
+
+    // add summary by amazon product title
+     update_post_meta($new_list_id,'app_summary',$post_info->post_title);    
+     add_post_meta($new_list_id,"_listing_duration",'');
+
+     // set featured image to this new listing
+     $attachment_id = get_post_meta($post_info->ID,'_thumbnail_id',true);
+
+     set_post_thumbnail( $new_list_id, $attachment_id );
+    
+
+  return $post_info->post_title;
+}
+
+
